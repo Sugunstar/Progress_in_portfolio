@@ -5,7 +5,7 @@ A small documentation that shares code one how a gradually build my portfolio by
 - Cursor Mask Reveal – Brief Explanation
 
 This component creates an interactive cursor-based mask reveal animation built using **AI** assistance and developed inside **Framer Workspace**.
-As the user moves their cursor, a smooth **animated mask ** follows it and reveals the background image through the foreground layer. **The mask supports multiple shapes** (circle, square, rounded, or custom image) and customizable size and follow speed.
+As the user moves their cursor, a smooth **animated mask** follows it and reveals the background image through the foreground layer. **The mask supports multiple shapes** (circle, square, rounded, or custom image) and customizable size and follow speed.
 
 **On click, the mask expands** to reveal the entire background, fades out the foreground image, and displays centered text with a smooth animated entrance. The animation uses **spring-based motion** for a natural feel and dynamically adapts to the container size, making it fully responsive and Framer-friendly.
 
