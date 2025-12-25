@@ -1,0 +1,316 @@
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
+import { motion, useMotionValue, useSpring, useTransform } from "framer-motion"
+import { useEffect, useRef, useState, type CSSProperties } from "react"
+
+/**
+ * Cursor Mask Reveal (Refactored)
+ * - Background & Foreground separated
+ * - Optional text reveal on expand
+ * - Framer-friendly controls
+ */
+
+interface CursorMaskRevealProps {
+    foregroundImage?: { src: string }
+    backgroundImage?: { src: string }
+
+    showForeground: boolean
+    showBackground: boolean
+
+    text: string
+
+    maskSize: number
+    maskShape: "circle" | "square" | "rounded" | "custom"
+    maskImage?: { src: string }
+    followSpeed: number
+    borderRadius: number
+    initialX: number
+    initialY: number
+}
+
+export default function CursorMaskReveal(props: CursorMaskRevealProps) {
+    const {
+        foregroundImage,
+        backgroundImage,
+        showForeground,
+        showBackground,
+        text,
+        maskSize,
+        maskShape,
+        maskImage,
+        followSpeed,
+        borderRadius,
+        initialX,
+        initialY,
+    } = props
+
+    const containerRef = useRef<HTMLDivElement>(null)
+    const isStatic = useIsStaticRenderer()
+    const [isExpanded, setIsExpanded] = useState(false)
+    const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
+
+    useEffect(() => {
+        if (!containerRef.current) return
+        const update = () => {
+            const { width, height } =
+                containerRef.current!.getBoundingClientRect()
+            setContainerSize({ width, height })
+        }
+        update()
+        const ro = new ResizeObserver(update)
+        ro.observe(containerRef.current)
+        return () => ro.disconnect()
+    }, [])
+
+    const mouseX = useMotionValue(initialX)
+    const mouseY = useMotionValue(initialY)
+
+    const stiffness = 50 + followSpeed * 300
+    const damping = 15 + followSpeed * 20
+
+    const smoothX = useSpring(mouseX, { stiffness, damping })
+    const smoothY = useSpring(mouseY, { stiffness, damping })
+
+    const targetSize = isExpanded
+        ? Math.max(containerSize.width, containerSize.height) * 2.5
+        : maskSize
+
+    const smoothMaskSize = useSpring(targetSize, {
+        stiffness: 100,
+        damping: 20,
+    })
+
+    useEffect(() => {
+        smoothMaskSize.set(targetSize)
+    }, [targetSize])
+
+    const handleMouseMove = (e: React.MouseEvent) => {
+        if (!containerRef.current || isExpanded) return
+        const rect = containerRef.current.getBoundingClientRect()
+        mouseX.set(e.clientX - rect.left)
+        mouseY.set(e.clientY - rect.top)
+    }
+
+    const handleClick = () => {
+        if (isStatic) return
+        setIsExpanded((v) => !v)
+    }
+
+    useEffect(() => {
+        if (isExpanded) {
+            mouseX.set(containerSize.width / 2)
+            mouseY.set(containerSize.height / 2)
+        }
+    }, [isExpanded, containerSize])
+
+    const maskX = useTransform([smoothX, smoothMaskSize], ([x, s]) => x - s / 2)
+    const maskY = useTransform([smoothY, smoothMaskSize], ([y, s]) => y - s / 2)
+
+    const getMaskStyle = (): CSSProperties => {
+        if (maskShape === "circle") return { borderRadius: "50%" }
+        if (maskShape === "square") return { borderRadius: 0 }
+        if (maskShape === "rounded") return { borderRadius }
+        if (maskShape === "custom" && maskImage?.src) {
+            return {
+                maskImage: `url(${maskImage.src})`,
+                WebkitMaskImage: `url(${maskImage.src})`,
+                maskRepeat: "no-repeat",
+                WebkitMaskRepeat: "no-repeat",
+                maskSize: "contain",
+                WebkitMaskSize: "contain",
+                maskPosition: "center",
+                WebkitMaskPosition: "center",
+            }
+        }
+        return { borderRadius: "50%" }
+    }
+
+    const fgSrc =
+        foregroundImage?.src ||
+        "https://framerusercontent.com/images/GfGkADagM4KEibNcIiRUWlfrR0.jpg"
+    const bgSrc =
+        backgroundImage?.src ||
+        "https://framerusercontent.com/images/aNsAT3jCvt4zglbWCUoFe33Q.jpg"
+
+    return (
+        <div
+            ref={containerRef}
+            onMouseMove={isStatic ? undefined : handleMouseMove}
+            onClick={handleClick}
+            style={{
+                width: "100%",
+                height: "100%",
+                position: "relative",
+                overflow: "hidden",
+                cursor: isExpanded ? "pointer" : "none",
+            }}
+        >
+            {/* Background */}
+            {showBackground && (
+                <motion.div
+                    animate={{ scale: isExpanded ? 1.05 : 1 }}
+                    transition={{ duration: 0.6 }}
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        backgroundImage: `url(${bgSrc})`,
+                        backgroundSize: "cover",
+                        backgroundPosition: "center",
+                        zIndex: 0,
+                    }}
+                />
+            )}
+
+            {/* Text Reveal */}
+            <motion.div
+                initial={{ opacity: 0, y: 40 }}
+                animate={
+                    isExpanded ? { opacity: 1, y: 0 } : { opacity: 0, y: 40 }
+                }
+                transition={{ type: "spring", stiffness: 120, damping: 18 }}
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    zIndex: 5,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    pointerEvents: "none",
+                    color: "white",
+                    fontSize: 48,
+                    fontWeight: 700,
+                    textAlign: "center",
+                }}
+            >
+                {text}
+            </motion.div>
+
+            {/* Foreground */}
+            {showForeground && (
+                <motion.div
+                    animate={{ opacity: isExpanded ? 0 : 1 }}
+                    transition={{ duration: 0.4 }}
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        backgroundImage: `url(${fgSrc})`,
+                        backgroundSize: "cover",
+                        backgroundPosition: "center",
+                        zIndex: 2,
+                    }}
+                />
+            )}
+
+            {/* Mask Reveal */}
+            <motion.div
+                style={{
+                    position: "absolute",
+                    width: smoothMaskSize,
+                    height: smoothMaskSize,
+                    x: maskX,
+                    y: maskY,
+                    zIndex: 10,
+                    overflow: "hidden",
+                    pointerEvents: "none",
+                    ...getMaskStyle(),
+                }}
+            >
+                <InnerImage
+                    src={bgSrc}
+                    maskX={maskX}
+                    maskY={maskY}
+                    width={containerSize.width}
+                    height={containerSize.height}
+                />
+            </motion.div>
+        </div>
+    )
+}
+
+function InnerImage({ src, maskX, maskY, width, height }) {
+    const inverseX = useTransform(maskX, (v) => -v)
+    const inverseY = useTransform(maskY, (v) => -v)
+
+    if (!width || !height) return null
+
+    return (
+        <motion.div
+            style={{
+                width,
+                height,
+                backgroundImage: `url(${src})`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+                x: inverseX,
+                y: inverseY,
+                position: "absolute",
+            }}
+        />
+    )
+}
+
+addPropertyControls(CursorMaskReveal, {
+    foregroundImage: {
+        type: ControlType.ResponsiveImage,
+        title: "Foreground",
+    },
+    backgroundImage: {
+        type: ControlType.ResponsiveImage,
+        title: "Background",
+    },
+    showForeground: {
+        type: ControlType.Boolean,
+        title: "Show Foreground",
+        defaultValue: true,
+    },
+    showBackground: {
+        type: ControlType.Boolean,
+        title: "Show Background",
+        defaultValue: true,
+    },
+    text: {
+        type: ControlType.String,
+        title: "Text",
+        defaultValue: "Background Revealed",
+    },
+    maskSize: {
+        type: ControlType.Number,
+        title: "Mask Size",
+        defaultValue: 200,
+        min: 50,
+        max: 1000,
+    },
+    maskShape: {
+        type: ControlType.Enum,
+        title: "Shape",
+        options: ["circle", "square", "rounded", "custom"],
+        defaultValue: "circle",
+    },
+    borderRadius: {
+        type: ControlType.Number,
+        title: "Radius",
+        defaultValue: 20,
+        hidden: (p) => p.maskShape !== "rounded",
+    },
+    maskImage: {
+        type: ControlType.ResponsiveImage,
+        title: "Mask Image",
+        hidden: (p) => p.maskShape !== "custom",
+    },
+    followSpeed: {
+        type: ControlType.Number,
+        title: "Follow Speed",
+        defaultValue: 0.5,
+        min: 0.1,
+        max: 1,
+    },
+    initialX: {
+        type: ControlType.Number,
+        title: "Start X",
+        defaultValue: 300,
+    },
+    initialY: {
+        type: ControlType.Number,
+        title: "Start Y",
+        defaultValue: 200,
+    },
+})
