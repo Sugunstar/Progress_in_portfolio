@@ -1,5 +1,6 @@
 # Progress_in_portfolio
-A small documentation that shares code one how a gradually build my portfolio by adding elements to framer via writeing code
+A small documentation that shares code one how a gradually build my portfolio by adding elements to framer via writeing code.....half way there, still building, documenting day wise progress
+[My Porfolio](https://sugunadithya2007.framer.website/)
 
 # Day 1
 - Cursor Mask Reveal – Brief Explanation
