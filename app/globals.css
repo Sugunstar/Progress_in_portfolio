@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+:root {
+  --color-main-bg: #000000;
+  --color-menu-bg: #F5F0DD;
+  --color-main-text: #F5F0DD;
+  --color-menu-text: #000000;
+  --color-close-btn: #F5F0DD;
+}
+
+@theme inline {
+  --color-main-bg: var(--color-main-bg);
+  --color-menu-bg: var(--color-menu-bg);
+  --color-main-text: var(--color-main-text);
+  --color-menu-text: var(--color-menu-text);
+  --font-tt: var(--font-tt), monospace;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-tt), monospace;
+  background-color: var(--color-main-bg);
+  color: var(--color-main-text);
+  overflow: hidden; /* Scroll is managed by Lenis */
+}
