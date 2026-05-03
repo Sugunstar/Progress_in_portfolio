@@ -1,6 +1,7 @@
 export const config = {
   // Stage 0 / Stage 1 strings
-  cursorHintStage0Text: "scroll!!",
+  cursorHintStage0Text: "scroll !!",
+  cursorHintScrollingText: "keep scrolling !!",
   cursorHintTextColor: "#FFFFFF",
   cursorHintBackgroundColor: "rgba(0,0,0,0.7)",
   cursorHintBorderColor: "rgba(255,255,255,0.4)",

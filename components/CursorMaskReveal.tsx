@@ -30,6 +30,7 @@ export function CursorMaskReveal() {
   const offsetMV = useMotionValue(0)
   const [offsetState, setOffsetState] = useState(0)
   const [hasScrolled, setHasScrolled] = useState(false)
+  const [hasReachedPage2, setHasReachedPage2] = useState(false)
   const touchLastYRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -43,6 +44,12 @@ export function CursorMaskReveal() {
     : offsetState < containerSize.height * 1.0 ? 0
     : offsetState < containerSize.height * 2.2 ? 1
     : 2
+
+  useEffect(() => {
+    if (stage === 2) {
+      setHasReachedPage2(true)
+    }
+  }, [stage])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -139,6 +146,7 @@ export function CursorMaskReveal() {
       <CursorHint
         stage={stage}
         hasScrolled={hasScrolled}
+        hasReachedPage2={hasReachedPage2}
         hasOpenedMenu={hasOpenedMenu}
         isPointerInside={isPointerInside}
         smoothX={smoothX}

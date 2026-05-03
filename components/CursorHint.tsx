@@ -6,6 +6,7 @@ import { config } from '@/lib/config'
 interface CursorHintProps {
   stage: number
   hasScrolled: boolean
+  hasReachedPage2: boolean
   hasOpenedMenu: boolean
   isPointerInside: boolean
   smoothX: MotionValue<number>
@@ -15,6 +16,7 @@ interface CursorHintProps {
 export function CursorHint({
   stage,
   hasScrolled,
+  hasReachedPage2,
   hasOpenedMenu,
   isPointerInside,
   smoothX,
@@ -22,8 +24,9 @@ export function CursorHint({
 }: CursorHintProps) {
   if (!isPointerInside) return null
 
-  // Stage 0 hint
-  if (stage === 0 && !hasScrolled) {
+  // Stage 0 / 1 hint
+  if (stage < 2 && !hasReachedPage2) {
+    const hintText = hasScrolled ? config.cursorHintScrollingText : config.cursorHintStage0Text
     return (
       <motion.div
         style={{
@@ -45,7 +48,7 @@ export function CursorHint({
           ...config.fonts.cursorHintFont,
         }}
       >
-        {config.cursorHintStage0Text}
+        {hintText}
       </motion.div>
     )
   }
