@@ -2,7 +2,6 @@
 
 import { motion } from 'framer-motion'
 import { config } from '@/lib/config'
-import { useState } from 'react'
 
 interface MenuOverlayProps {
   isOpen: boolean
@@ -11,7 +10,6 @@ interface MenuOverlayProps {
 }
 
 export function MenuOverlay({ isOpen, onClose, onSelect }: MenuOverlayProps) {
-  const [hoveredMenuIndex, setHoveredMenuIndex] = useState<number | null>(null)
 
   return (
     <motion.div
@@ -39,6 +37,16 @@ export function MenuOverlay({ isOpen, onClose, onSelect }: MenuOverlayProps) {
         pointerEvents: 'none',
         backgroundColor: 'rgba(255, 255, 255, 0.03)',
       }} />
+
+      <style>{`
+        .menu-item-hover span {
+          background-size: 0% 3px !important;
+          transition: background-size 0.25s cubic-bezier(0.22, 0.61, 0.36, 1) !important;
+        }
+        .menu-item-hover:hover span {
+          background-size: 100% 3px !important;
+        }
+      `}</style>
 
       <button
         onClick={onClose}
@@ -69,9 +77,8 @@ export function MenuOverlay({ isOpen, onClose, onSelect }: MenuOverlayProps) {
               {config.menuItems.map((item, index) => (
                 <button
                   key={index}
+                  className="menu-item-hover"
                   onClick={() => onSelect(index)}
-                  onMouseEnter={() => setHoveredMenuIndex(index)}
-                  onMouseLeave={() => setHoveredMenuIndex(null)}
                   style={{
                     background: 'none',
                     border: 'none',
@@ -82,19 +89,17 @@ export function MenuOverlay({ isOpen, onClose, onSelect }: MenuOverlayProps) {
                     ...config.fonts.menuItemsFont
                   }}
                 >
-                  <motion.span
+                  <span
                     style={{
                       position: 'relative',
                       display: 'inline-block',
                       backgroundImage: 'linear-gradient(currentColor, currentColor)',
                       backgroundPosition: '0 100%',
-                      backgroundRepeat: 'no-repeat',
-                      backgroundSize: hoveredMenuIndex === index ? '100% 3px' : '0% 3px',
-                      transition: 'background-size 0.25s cubic-bezier(0.22, 0.61, 0.36, 1)',
+                      backgroundRepeat: 'no-repeat'
                     }}
                   >
                     {item}
-                  </motion.span>
+                  </span>
                 </button>
               ))}
             </div>
