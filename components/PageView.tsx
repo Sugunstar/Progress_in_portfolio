@@ -177,7 +177,7 @@ export function PageView({ index, isLeaving, onClose }: PageViewProps) {
   return (
     <motion.div
       initial={{ opacity: 0 }}
-      animate={{ opacity: isLeaving ? 0 : (videoSrc && !isVideoReady ? 0 : 1) }}
+      animate={{ opacity: isLeaving ? 0 : 1 }}
       transition={{ duration: 0.3 }}
       style={{
         position: 'absolute',
@@ -195,7 +195,32 @@ export function PageView({ index, isLeaving, onClose }: PageViewProps) {
         zIndex: 50,
       }}
     >
-      {videoSrc && <VideoChromaKey src={videoSrc} onReady={() => setIsVideoReady(true)} />}
+      {!isVideoReady && videoSrc && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 15 }}>
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+            style={{
+              width: '40px',
+              height: '40px',
+              border: '3px solid rgba(255, 255, 255, 0.3)',
+              borderTop: '3px solid white',
+              borderRadius: '50%',
+            }}
+          />
+        </div>
+      )}
+
+      {videoSrc && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: isVideoReady ? 1 : 0 }}
+          transition={{ duration: 0.5 }}
+          style={{ position: 'absolute', inset: 0, zIndex: 10, pointerEvents: 'none' }}
+        >
+          <VideoChromaKey src={videoSrc} onReady={() => setIsVideoReady(true)} />
+        </motion.div>
+      )}
 
       <button
         onClick={onClose}

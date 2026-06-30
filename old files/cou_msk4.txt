@@ -1,0 +1,727 @@
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
+import { motion, useSpring, useTransform, useMotionValue, useInView } from "framer-motion"
+import {
+    useEffect,
+    useRef,
+    useState,
+    useCallback,
+    useMemo,
+    startTransition,
+    type CSSProperties,
+} from "react"
+
+/* ---------- TYPES ---------- */
+type Stage = 0 | 1 | 2
+
+interface CursorMaskRevealProps {
+    foregroundImage?: { src: string }
+    backgroundImage?: { src: string }
+    showForeground: boolean
+    showBackground: boolean
+    text: string
+    maskSize: number
+    maskShape: "circle" | "square" | "rounded" | "custom"
+    maskImage?: { src: string }
+    followSpeed: number
+    borderRadius: number
+    initialX: number
+    initialY: number
+    mainHeadingLines: string[]
+    mainDescription: string
+    menuItems: string[]
+}
+
+export default function CursorMaskReveal(props: CursorMaskRevealProps) {
+    const {
+        foregroundImage,
+        backgroundImage,
+        showForeground,
+        showBackground,
+        text,
+        maskSize,
+        maskShape,
+        maskImage,
+        followSpeed,
+        borderRadius,
+        initialX,
+        initialY,
+        mainHeadingLines,
+        mainDescription,
+        menuItems,
+    } = props
+
+    const containerRef = useRef<HTMLDivElement>(null)
+    const isStatic = useIsStaticRenderer()
+
+    /* ---------- SIZE ---------- */
+    const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
+    const touchLastYRef = useRef<number | null>(null)
+
+    useEffect(() => {
+        if (!containerRef.current) return
+        const update = () => {
+            const r = containerRef.current!.getBoundingClientRect()
+            startTransition(() =>
+                setContainerSize({ width: r.width, height: r.height })
+            )
+        }
+        update()
+        const ro = new ResizeObserver(update)
+        ro.observe(containerRef.current)
+        return () => ro.disconnect()
+    }, [])
+
+    /* ---------- SCROLL OFFSET ---------- */
+    const offsetMV = useMotionValue(0)
+    const [offsetState, setOffsetState] = useState(0)
+
+    useEffect(() => {
+        offsetMV.set(offsetState)
+    }, [offsetState, offsetMV])
+
+    /* ---------- STAGE ---------- */
+    const stage: Stage =
+        containerSize.height === 0
+            ? 0
+            : offsetState < containerSize.height * 0.6
+              ? 0
+              : offsetState < containerSize.height * 1.6
+                ? 1
+                : 2
+
+    /* ---------- WHEEL ---------- */
+    useEffect(() => {
+        if (!containerRef.current || isStatic) return
+
+        const onWheel = (e: WheelEvent) => {
+            e.preventDefault()
+            if (!containerSize.height) return
+
+            const max = containerSize.height * 2
+            setOffsetState((v) => Math.max(0, Math.min(max, v + e.deltaY)))
+        }
+
+        const el = containerRef.current
+        el.addEventListener("wheel", onWheel, { passive: false })
+        return () => el.removeEventListener("wheel", onWheel)
+    }, [containerSize.height, isStatic])
+
+    /* ---------- CURSOR ---------- */
+    const mouseX = useMotionValue(initialX)
+    const mouseY = useMotionValue(initialY)
+
+    const smoothX = useSpring(mouseX, {
+        stiffness: 80 + followSpeed * 300,
+        damping: 18,
+    })
+    const smoothY = useSpring(mouseY, {
+        stiffness: 80 + followSpeed * 300,
+        damping: 18,
+    })
+
+    const fullscreenSize =
+        Math.max(containerSize.width, containerSize.height) * 2.5
+
+    /* ✅ SAFE TRANSFORM (MotionValue → MotionValue) */
+    const maskSizeMV = useSpring(
+        useTransform(
+            offsetMV,
+            [0, containerSize.height],
+            [maskSize, fullscreenSize],
+            { clamp: true }
+        ),
+        { stiffness: 120, damping: 22 }
+    )
+
+    const maskX = useTransform([smoothX, maskSizeMV], ([x, s]) => x - s / 2)
+    const maskY = useTransform([smoothY, maskSizeMV], ([y, s]) => y - s / 2)
+
+    const inverseX = useTransform(maskX, (v) => -v)
+    const inverseY = useTransform(maskY, (v) => -v)
+
+    const updatePointerFromClient = (clientX: number, clientY: number) => {
+        if (!containerRef.current) return
+        const r = containerRef.current.getBoundingClientRect()
+        mouseX.set(clientX - r.left)
+        mouseY.set(clientY - r.top)
+    }
+
+    const handleMouseMove = (e: React.MouseEvent) => {
+        updatePointerFromClient(e.clientX, e.clientY)
+    }
+
+    const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+        if (!e.touches[0]) return
+        touchLastYRef.current = e.touches[0].clientY
+        updatePointerFromClient(e.touches[0].clientX, e.touches[0].clientY)
+    }
+
+    const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+        if (!containerSize.height || !e.touches[0]) return
+        const currentY = e.touches[0].clientY
+        const lastY = touchLastYRef.current ?? currentY
+        const deltaY = lastY - currentY
+        touchLastYRef.current = currentY
+
+        const max = containerSize.height * 2
+        setOffsetState((v) => Math.max(0, Math.min(max, v + deltaY)))
+        updatePointerFromClient(e.touches[0].clientX, e.touches[0].clientY)
+    }
+
+    /* ---------- PAGE MOVE ---------- */
+    const contentY = useSpring(
+        useTransform(offsetMV, (v: number) =>
+            v <= containerSize.height ? 0 : -(v - containerSize.height)
+        ),
+        { stiffness: 120, damping: 22 }
+    )
+
+    const getMaskStyle = (): CSSProperties => {
+        if (maskShape === "circle") return { borderRadius: "50%" }
+        if (maskShape === "square") return { borderRadius: 0 }
+        if (maskShape === "rounded") return { borderRadius }
+        if (maskShape === "custom" && maskImage?.src) {
+            return {
+                maskImage: `url(${maskImage.src})`,
+                WebkitMaskImage: `url(${maskImage.src})`,
+                maskRepeat: "no-repeat",
+                WebkitMaskRepeat: "no-repeat",
+                maskSize: "contain",
+                WebkitMaskSize: "contain",
+                maskPosition: "center",
+                WebkitMaskPosition: "center",
+            }
+        }
+        return { borderRadius: "50%" }
+    }
+
+    const fgSrc = foregroundImage?.src
+    const bgSrc = backgroundImage?.src
+
+    return (
+        <div
+            ref={containerRef}
+            onMouseMove={isStatic ? undefined : handleMouseMove}
+            onTouchStart={isStatic ? undefined : handleTouchStart}
+            onTouchMove={isStatic ? undefined : handleTouchMove}
+            style={{
+                width: "100%",
+                height: "100%",
+                position: "relative",
+                overflow: "hidden",
+                background: "#000",
+                cursor: "default",
+            }}
+        >
+            <motion.div
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    height: "200%",
+                    y: contentY,
+                }}
+            >
+                {/* PAGE 1: Foreground + Background + Mask */}
+                <div style={{ height: "50%", position: "relative" }}>
+                    {showBackground && bgSrc && (
+                        <div
+                            style={{
+                                position: "absolute",
+                                inset: 0,
+                                backgroundImage: `url(${bgSrc})`,
+                                backgroundSize: "cover",
+                                backgroundPosition: "center",
+                            }}
+                        />
+                    )}
+
+                    {showForeground && (
+                        <motion.div
+                            animate={{ opacity: stage === 0 ? 1 : 0 }}
+                            transition={{ duration: 0.35 }}
+                            style={{
+                                position: "absolute",
+                                inset: 0,
+                                backgroundImage: `url(${fgSrc})`,
+                                backgroundSize: "cover",
+                                backgroundPosition: "center",
+                                zIndex: 2,
+                            }}
+                        />
+                    )}
+
+                    {stage <= 1 && (
+                        <motion.div
+                            style={{
+                                position: "absolute",
+                                width: maskSizeMV,
+                                height: maskSizeMV,
+                                x: maskX,
+                                y: maskY,
+                                zIndex: 4,
+                                overflow: "hidden",
+                                pointerEvents: "none",
+                                ...getMaskStyle(),
+                            }}
+                        >
+                            <motion.div
+                                style={{
+                                    width: containerSize.width,
+                                    height: containerSize.height,
+                                    backgroundImage: `url(${bgSrc})`,
+                                    backgroundSize: "cover",
+                                    backgroundPosition: "center",
+                                    x: inverseX,
+                                    y: inverseY,
+                                }}
+                            />
+                        </motion.div>
+                    )}
+                </div>
+
+                {/* PAGE 2: Crazy Navigation */}
+                <div style={{ height: "50%", position: "relative" }}>
+                    <CrazyNavigation
+                        menuLabel="Menu"
+                        closeLabel="Close"
+                        introTitle="Introduction"
+                        menuItems={menuItems}
+                        mainBackground="#000000"
+                        menuBackground="#F5F0DD"
+                        primaryTextColor="#000000"
+                        inverseTextColor="#F5F0DD"
+                        headingFont={{
+                            fontSize: "32px",
+                            letterSpacing: "-0.03em",
+                            lineHeight: "1.1em",
+                        }}
+                        bodyFont={{
+                            fontSize: "20px",
+                            letterSpacing: "-0.01em",
+                            lineHeight: "1.3em",
+                        }}
+                        buttonFont={{
+                            fontSize: "14px",
+                            letterSpacing: "-0.01em",
+                            lineHeight: "1em",
+                        }}
+                        animationDuration={0.7}
+                        mainHeadingLines={mainHeadingLines}
+                        mainDescription={mainDescription}
+                        style={{ width: "100%", height: "100%" }}
+                    />
+                </div>
+            </motion.div>
+        </div>
+    )
+}
+
+interface CrazyNavProps {
+    menuLabel: string
+    closeLabel: string
+    introTitle: string
+    menuItems: string[]
+    mainBackground: string
+    menuBackground: string
+    primaryTextColor: string
+    inverseTextColor: string
+    headingFont: any
+    bodyFont: any
+    buttonFont: any
+    animationDuration: number
+    style?: CSSProperties
+    children?: any
+    mainHeadingLines: string[]
+    mainDescription: string
+}
+
+function CrazyNavigation(props: CrazyNavProps) {
+    const {
+        menuLabel,
+        closeLabel,
+        introTitle,
+        menuItems,
+        mainBackground,
+        menuBackground,
+        primaryTextColor,
+        inverseTextColor,
+        headingFont,
+        bodyFont,
+        buttonFont,
+        animationDuration,
+        style,
+        children,
+        mainHeadingLines,
+        mainDescription,
+    } = props
+
+    const [isOpen, setIsOpen] = useState(false)
+    const isStatic = useIsStaticRenderer()
+    const panelRef = useRef<HTMLDivElement | null>(null)
+    const inView = useInView(panelRef, { margin: "0px", amount: 0.2 })
+
+    const duration = useMemo(() => {
+        if (isStatic || !inView) return 0
+        return animationDuration
+    }, [isStatic, inView, animationDuration])
+
+    const handleToggle = useCallback(() => {
+        startTransition(() => {
+            setIsOpen((prev) => !prev)
+        })
+    }, [])
+
+    const containerStyle: CSSProperties = {
+        position: "relative",
+        width: "100%",
+        height: "100%",
+        overflow: "hidden",
+        ...style,
+    }
+
+    const mainPanelVariants = {
+        closed: {
+            x: 0,
+            y: 0,
+            scale: 1,
+            rotate: 0,
+            borderRadius: 0,
+            boxShadow: "0 0 0 rgba(0,0,0,0)",
+        },
+        open: {
+            x: "28%",
+            y: "8%",
+            scale: 0.65,
+            rotate: -14,
+            borderRadius: 32,
+            boxShadow: "0 40px 80px rgba(0,0,0,0.5)",
+        },
+    }
+
+    const menuOpacityVariants = {
+        closed: { opacity: 0 },
+        open: { opacity: 1 },
+    }
+
+    const isFixedWidth = style && style.width === "100%"
+    const textAlignCenter = { textAlign: "center" as const }
+
+    return (
+        <div style={containerStyle}>
+            {/* Menu Background */}
+            <motion.div
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    backgroundColor: menuBackground,
+                    color: primaryTextColor,
+                    padding: "32px 56px",
+                    boxSizing: "border-box",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "flex-start",
+                    pointerEvents: isOpen ? "auto" : "none",
+                    zIndex: 1,
+                }}
+                variants={menuOpacityVariants}
+                animate={isOpen ? "open" : "closed"}
+                initial="closed"
+                transition={{ duration, ease: [0.22, 0.61, 0.36, 1] }}
+            >
+                {/* Close Button */}
+                <button
+                    onClick={handleToggle}
+                    style={{
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        margin: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        cursor: "pointer",
+                        color: primaryTextColor,
+                        ...buttonFont,
+                    }}
+                    aria-label={isOpen ? closeLabel : menuLabel}
+                >
+                    <span
+                        aria-hidden="true"
+                        style={{
+                            fontSize: 20,
+                            lineHeight: 1,
+                            transform: "translateY(-1px)",
+                        }}
+                    >
+                        ×
+                    </span>
+                    <span>{closeLabel}</span>
+                </button>
+
+                {/* Menu Content */}
+                <div
+                    style={{
+                        flex: 1,
+                        display: "flex",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 40,
+                    }}
+                >
+                    {/* Menu Items */}
+                    <div
+                        style={{
+                            maxWidth: "48%",
+                            ...headingFont,
+                            color: primaryTextColor,
+                        }}
+                    >
+                        <div
+                            style={{
+                                marginBottom: 40,
+                                fontSize: headingFont?.fontSize ?? 32,
+                                lineHeight: headingFont?.lineHeight ?? "1.1em",
+                                ...textAlignCenter,
+                            }}
+                        >
+                            {introTitle}
+                        </div>
+                        <div
+                            style={{
+                                ...bodyFont,
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 24,
+                                fontSize: bodyFont?.fontSize ?? 20,
+                            }}
+                        >
+                            {menuItems.map((item, index) => (
+                                <div key={index} style={textAlignCenter}>
+                                    {`${index + 1}. ${item}`}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Empty spacer so tilted panel on the right has room */}
+                    <div style={{ flex: 1, minWidth: 0 }} />
+                </div>
+            </motion.div>
+
+            {/* Main Panel */}
+            <motion.div
+                ref={panelRef}
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    backgroundColor: mainBackground,
+                    color: inverseTextColor,
+                    overflow: "hidden",
+                    boxSizing: "border-box",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    transformOrigin: "center center",
+                    zIndex: 2,
+                }}
+                variants={mainPanelVariants}
+                initial="closed"
+                animate={isOpen ? "open" : "closed"}
+                transition={{ duration, ease: [0.22, 0.61, 0.36, 1] }}
+            >
+                {/* Top Bar */}
+                <div
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "24px 32px",
+                        ...buttonFont,
+                    }}
+                >
+                    <button
+                        onClick={handleToggle}
+                        style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            background: "none",
+                            border: "none",
+                            color: inverseTextColor,
+                            cursor: "pointer",
+                            padding: 0,
+                            margin: 0,
+                            ...buttonFont,
+                        }}
+                        aria-label={isOpen ? closeLabel : menuLabel}
+                    >
+                        <span
+                            aria-hidden="true"
+                            style={{
+                                display: "inline-block",
+                                position: "relative",
+                                width: 18,
+                                height: 10,
+                            }}
+                        >
+                            {isOpen ? (
+                                <>
+                                    <span
+                                        style={{
+                                            position: "absolute",
+                                            top: 4,
+                                            left: 0,
+                                            right: 0,
+                                            height: 2,
+                                            backgroundColor: inverseTextColor,
+                                            transform: "rotate(45deg)",
+                                            transformOrigin: "center",
+                                        }}
+                                    />
+                                    <span
+                                        style={{
+                                            position: "absolute",
+                                            top: 4,
+                                            left: 0,
+                                            right: 0,
+                                            height: 2,
+                                            backgroundColor: inverseTextColor,
+                                            transform: "rotate(-45deg)",
+                                            transformOrigin: "center",
+                                        }}
+                                    />
+                                </>
+                            ) : (
+                                <>
+                                    <span
+                                        style={{
+                                            position: "absolute",
+                                            top: 0,
+                                            left: 0,
+                                            right: 0,
+                                            height: 2,
+                                            backgroundColor: inverseTextColor,
+                                        }}
+                                    />
+                                    <span
+                                        style={{
+                                            position: "absolute",
+                                            bottom: 0,
+                                            left: 0,
+                                            right: 0,
+                                            height: 2,
+                                            backgroundColor: inverseTextColor,
+                                        }}
+                                    />
+                                </>
+                            )}
+                        </span>
+                        <span>{menuLabel}</span>
+                    </button>
+                </div>
+
+                {/* Main Content */}
+                <div
+                    style={{
+                        flex: 1,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "0 40px 40px",
+                        boxSizing: "border-box",
+                    }}
+                >
+                    {children ? (
+                        children
+                    ) : (
+                        <div
+                            style={{
+                                width: isFixedWidth ? "100%" : "max-content",
+                                minWidth: isFixedWidth
+                                    ? undefined
+                                    : "max-content",
+                                ...headingFont,
+                                color: inverseTextColor,
+                                fontSize: 120,
+                                lineHeight: "0.82em",
+                                letterSpacing: "-0.04em",
+                                textAlign: "center",
+                                textTransform: "uppercase",
+                            }}
+                        >
+                            {mainHeadingLines.map((line, index) => (
+                                <div key={index}>{line}</div>
+                            ))}
+                            <div
+                                style={{
+                                    ...bodyFont,
+                                    fontSize: 20,
+                                    marginTop: 40,
+                                    textTransform: "none",
+                                }}
+                            >
+                                {mainDescription}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </motion.div>
+        </div>
+    )
+}
+
+/* ---------- CONTROLS ---------- */
+addPropertyControls(CursorMaskReveal, {
+    foregroundImage: { type: ControlType.ResponsiveImage },
+    backgroundImage: { type: ControlType.ResponsiveImage },
+    showForeground: { type: ControlType.Boolean, defaultValue: true },
+    showBackground: { type: ControlType.Boolean, defaultValue: true },
+    text: { type: ControlType.String, defaultValue: "Background Revealed" },
+    maskSize: { type: ControlType.Number, defaultValue: 200 },
+    maskShape: {
+        type: ControlType.Enum,
+        options: ["circle", "square", "rounded", "custom"],
+        defaultValue: "circle",
+    },
+    borderRadius: {
+        type: ControlType.Number,
+        defaultValue: 20,
+        hidden: (p) => p.maskShape !== "rounded",
+    },
+    maskImage: {
+        type: ControlType.ResponsiveImage,
+        hidden: (p) => p.maskShape !== "custom",
+    },
+    followSpeed: { type: ControlType.Number, defaultValue: 0.5 },
+    initialX: { type: ControlType.Number, defaultValue: 300 },
+    initialY: { type: ControlType.Number, defaultValue: 200 },
+    mainHeadingLines: {
+        type: ControlType.Array,
+        title: "Main Headings",
+        defaultValue: ["Crazy", "Navigation", "Animation"],
+        control: {
+            type: ControlType.String,
+        },
+    },
+    mainDescription: {
+        type: ControlType.String,
+        title: "Main Description",
+        defaultValue: "Click the menu on the top left to see the magic...",
+    },
+    menuItems: {
+        type: ControlType.Array,
+        title: "Menu Items",
+        defaultValue: [
+            "Fall Of the Follower",
+            "How Creators Really feel",
+            "Hope in a Post-Follower World",
+            "The Core Fan Era",
+            "Creators are crushing it",
+            "Patreon's Responsibility",
+        ],
+        control: {
+            type: ControlType.String,
+        },
+    },
+})

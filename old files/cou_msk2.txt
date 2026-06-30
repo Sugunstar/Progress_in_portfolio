@@ -1,0 +1,280 @@
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
+import { motion, useMotionValue, useSpring, useTransform } from "framer-motion"
+import { useEffect, useRef, useState, type CSSProperties } from "react"
+
+type Stage = 0 | 1 | 2
+
+interface CursorMaskRevealProps {
+    foregroundImage?: { src: string }
+    backgroundImage?: { src: string }
+    showForeground: boolean
+    showBackground: boolean
+    text: string
+    maskSize: number
+    maskShape: "circle" | "square" | "rounded" | "custom"
+    maskImage?: { src: string }
+    followSpeed: number
+    borderRadius: number
+    initialX: number
+    initialY: number
+}
+
+export default function CursorMaskReveal(props: CursorMaskRevealProps) {
+    const {
+        foregroundImage,
+        backgroundImage,
+        showForeground,
+        showBackground,
+        text,
+        maskSize,
+        maskShape,
+        maskImage,
+        followSpeed,
+        borderRadius,
+        initialX,
+        initialY,
+    } = props
+
+    const containerRef = useRef<HTMLDivElement>(null)
+    const isStatic = useIsStaticRenderer()
+
+    const [stage, setStage] = useState<Stage>(0)
+    const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
+
+    /* ---------- Resize ---------- */
+    useEffect(() => {
+        if (!containerRef.current) return
+        const update = () => {
+            const { width, height } =
+                containerRef.current!.getBoundingClientRect()
+            setContainerSize({ width, height })
+        }
+        update()
+        const ro = new ResizeObserver(update)
+        ro.observe(containerRef.current)
+        return () => ro.disconnect()
+    }, [])
+
+    /* ---------- Scroll logic ---------- */
+    useEffect(() => {
+        if (!containerRef.current || isStatic) return
+        let locked = false
+
+        const onWheel = (e: WheelEvent) => {
+            if (locked) return
+            locked = true
+
+            setStage((s) =>
+                e.deltaY > 0
+                    ? (Math.min(2, s + 1) as Stage)
+                    : (Math.max(0, s - 1) as Stage)
+            )
+
+            setTimeout(() => (locked = false), 600)
+        }
+
+        containerRef.current.addEventListener("wheel", onWheel, {
+            passive: true,
+        })
+
+        return () => containerRef.current?.removeEventListener("wheel", onWheel)
+    }, [isStatic])
+
+    /* ---------- Cursor motion ---------- */
+    const mouseX = useMotionValue(initialX)
+    const mouseY = useMotionValue(initialY)
+
+    const smoothX = useSpring(mouseX, {
+        stiffness: 50 + followSpeed * 300,
+        damping: 15 + followSpeed * 20,
+    })
+    const smoothY = useSpring(mouseY, {
+        stiffness: 50 + followSpeed * 300,
+        damping: 15 + followSpeed * 20,
+    })
+
+    const targetSize =
+        stage > 0
+            ? Math.max(containerSize.width, containerSize.height) * 2.5
+            : maskSize
+
+    const smoothMaskSize = useSpring(targetSize, {
+        stiffness: 100,
+        damping: 20,
+    })
+
+    useEffect(() => {
+        smoothMaskSize.set(targetSize)
+    }, [targetSize])
+
+    const handleMouseMove = (e: React.MouseEvent) => {
+        if (!containerRef.current) return
+        const rect = containerRef.current.getBoundingClientRect()
+        mouseX.set(e.clientX - rect.left)
+        mouseY.set(e.clientY - rect.top)
+    }
+
+    const maskX = useTransform([smoothX, smoothMaskSize], ([x, s]) => x - s / 2)
+    const maskY = useTransform([smoothY, smoothMaskSize], ([y, s]) => y - s / 2)
+
+    const getMaskStyle = (): CSSProperties => {
+        if (maskShape === "circle") return { borderRadius: "50%" }
+        if (maskShape === "square") return { borderRadius: 0 }
+        if (maskShape === "rounded") return { borderRadius }
+        if (maskShape === "custom" && maskImage?.src) {
+            return {
+                maskImage: `url(${maskImage.src})`,
+                WebkitMaskImage: `url(${maskImage.src})`,
+                maskRepeat: "no-repeat",
+                WebkitMaskRepeat: "no-repeat",
+                maskSize: "contain",
+                WebkitMaskSize: "contain",
+                maskPosition: "center",
+                WebkitMaskPosition: "center",
+            }
+        }
+        return { borderRadius: "50%" }
+    }
+
+    const fgSrc = foregroundImage?.src
+    const bgSrc = backgroundImage?.src
+
+    return (
+        <div
+            ref={containerRef}
+            onMouseMove={isStatic ? undefined : handleMouseMove}
+            style={{
+                width: "100%",
+                height: "100%",
+                position: "relative",
+                overflow: "hidden",
+                cursor: "default",
+            }}
+        >
+            {/* BACKGROUND (NO SCALING EVER) */}
+            {showBackground && (
+                <motion.div
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        backgroundImage: `url(${bgSrc})`,
+                        backgroundSize: "cover",
+                        backgroundPosition: "center",
+                        zIndex: 0,
+                    }}
+                />
+            )}
+
+            {/* TEXT */}
+            <motion.div
+                animate={
+                    stage > 0 ? { opacity: 1, y: 0 } : { opacity: 0, y: 40 }
+                }
+                transition={{ type: "spring", stiffness: 120, damping: 18 }}
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    zIndex: 5,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    pointerEvents: "none",
+                    color: "white",
+                    fontSize: 48,
+                    fontWeight: 700,
+                }}
+            >
+                {text}
+            </motion.div>
+
+            {/* FOREGROUND */}
+            {showForeground && (
+                <motion.div
+                    animate={{ opacity: stage === 0 ? 1 : 0 }}
+                    transition={{ duration: 0.4 }}
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        backgroundImage: `url(${fgSrc})`,
+                        backgroundSize: "cover",
+                        backgroundPosition: "center",
+                        zIndex: 2,
+                    }}
+                />
+            )}
+
+            {/* MASK */}
+            {stage <= 1 && (
+                <motion.div
+                    style={{
+                        position: "absolute",
+                        width: smoothMaskSize,
+                        height: smoothMaskSize,
+                        x: maskX,
+                        y: maskY,
+                        zIndex: 10,
+                        overflow: "hidden",
+                        pointerEvents: "none",
+                        ...getMaskStyle(),
+                    }}
+                >
+                    <InnerImage
+                        src={bgSrc}
+                        maskX={maskX}
+                        maskY={maskY}
+                        width={containerSize.width}
+                        height={containerSize.height}
+                    />
+                </motion.div>
+            )}
+        </div>
+    )
+}
+
+function InnerImage({ src, maskX, maskY, width, height }) {
+    const inverseX = useTransform(maskX, (v) => -v)
+    const inverseY = useTransform(maskY, (v) => -v)
+    if (!width || !height) return null
+
+    return (
+        <motion.div
+            style={{
+                width,
+                height,
+                backgroundImage: `url(${src})`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+                x: inverseX,
+                y: inverseY,
+                position: "absolute",
+            }}
+        />
+    )
+}
+
+/* ---------- FRAMER CONTROLS ---------- */
+addPropertyControls(CursorMaskReveal, {
+    foregroundImage: { type: ControlType.ResponsiveImage },
+    backgroundImage: { type: ControlType.ResponsiveImage },
+    showForeground: { type: ControlType.Boolean, defaultValue: true },
+    showBackground: { type: ControlType.Boolean, defaultValue: true },
+    text: { type: ControlType.String, defaultValue: "Background Revealed" },
+    maskSize: { type: ControlType.Number, defaultValue: 200 },
+    maskShape: {
+        type: ControlType.Enum,
+        options: ["circle", "square", "rounded", "custom"],
+        defaultValue: "circle",
+    },
+    borderRadius: {
+        type: ControlType.Number,
+        defaultValue: 20,
+        hidden: (p) => p.maskShape !== "rounded",
+    },
+    maskImage: {
+        type: ControlType.ResponsiveImage,
+        hidden: (p) => p.maskShape !== "custom",
+    },
+    followSpeed: { type: ControlType.Number, defaultValue: 0.5 },
+    initialX: { type: ControlType.Number, defaultValue: 300 },
+    initialY: { type: ControlType.Number, defaultValue: 200 },
+})

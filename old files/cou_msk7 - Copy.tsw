@@ -1,0 +1,1312 @@
+// User request: make it possible that for all the font tabs i should be able to add custom fonts
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
+import {
+    motion,
+    useSpring,
+    useTransform,
+    useMotionValue,
+    useInView,
+} from "framer-motion"
+import {
+    useEffect,
+    useRef,
+    useState,
+    useCallback,
+    useMemo,
+    startTransition,
+    type CSSProperties,
+    type MouseEvent,
+    type TouchEvent,
+} from "react"
+
+/* ---------- TYPES ---------- */
+type Stage = 0 | 1 | 2
+
+interface CursorMaskRevealProps {
+    foregroundImage?: { src: string }
+    backgroundImage?: { src: string }
+    maskSize: number
+    maskShape: "circle" | "square" | "rounded" | "custom"
+    maskImage?: { src: string }
+    followSpeed: number
+    borderRadius: number
+    initialX: number
+    initialY: number
+    mainHeadingLines: string[]
+    mainDescription: string
+    menuItems: string[]
+    stage2MenuBackgroundImage?: { src: string }
+    page1BackgroundImage?: { src: string }
+    page2BackgroundImage?: { src: string }
+    page3BackgroundImage?: { src: string }
+    stage2MenuTextColor: string
+    stage2MainTextColor: string
+    stage2HeadingFont: any
+    stage2BodyFont: any
+    introTitle: string
+    stage2MainBackground: string
+    cursorHintStage0Text: string
+    cursorHintStage2Text: string
+    cursorHintTextColor: string
+    cursorHintBackgroundColor: string
+    cursorHintBorderColor: string
+    cursorHintFont: any
+    stage2MainHeadingFont: any
+    stage2MainDescriptionFont: any
+    menuButtonLabel: string
+    menuButtonFont: any
+    closeButtonLabel: string
+    closeButtonFont: any
+    menuItemsAlignment?: "left" | "center" | "right"
+    stage2HeadingAlignment?: "left" | "center" | "right"
+    stage2DescriptionAlignment?: "left" | "center" | "right"
+}
+
+export default function CursorMaskReveal(props: CursorMaskRevealProps) {
+    const {
+        foregroundImage,
+        backgroundImage,
+        maskSize,
+        maskShape,
+        maskImage,
+        followSpeed,
+        borderRadius,
+        initialX,
+        initialY,
+        mainHeadingLines,
+        mainDescription,
+        menuItems,
+        stage2MenuBackgroundImage,
+        page1BackgroundImage,
+        page2BackgroundImage,
+        page3BackgroundImage,
+        stage2MenuTextColor,
+        stage2MainTextColor,
+        stage2HeadingFont,
+        stage2BodyFont,
+        introTitle,
+        stage2MainBackground,
+        cursorHintStage0Text,
+        cursorHintStage2Text,
+        cursorHintTextColor,
+        cursorHintBackgroundColor,
+        cursorHintBorderColor,
+        cursorHintFont,
+        stage2MainHeadingFont,
+        stage2MainDescriptionFont,
+        menuButtonLabel,
+        menuButtonFont,
+        closeButtonLabel,
+        closeButtonFont,
+        menuItemsAlignment,
+        stage2HeadingAlignment,
+        stage2DescriptionAlignment,
+    } = props
+
+    const containerRef = useRef<HTMLDivElement>(null)
+    const isStatic = useIsStaticRenderer()
+
+    /* ---------- SIZE ---------- */
+    const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
+    const touchLastYRef = useRef<number | null>(null)
+    const [hasScrolled, setHasScrolled] = useState(false)
+    const [hasOpenedMenu, setHasOpenedMenu] = useState(false)
+    const [isPointerInside, setIsPointerInside] = useState(false)
+    const [showMask, setShowMask] = useState(false)
+    const hideMaskTimeoutRef = useRef<number | null>(null)
+
+    useEffect(() => {
+        if (!containerRef.current) return
+        const update = () => {
+            const r = containerRef.current!.getBoundingClientRect()
+            startTransition(() =>
+                setContainerSize({ width: r.width, height: r.height })
+            )
+        }
+        update()
+        const ro = new ResizeObserver(update)
+        ro.observe(containerRef.current)
+        return () => ro.disconnect()
+    }, [])
+
+    /* ---------- SCROLL OFFSET ---------- */
+    const offsetMV = useMotionValue(0)
+    const [offsetState, setOffsetState] = useState(0)
+
+    useEffect(() => {
+        offsetMV.set(offsetState)
+    }, [offsetState, offsetMV])
+
+    /* ---------- STAGE ---------- */
+    const stage: Stage =
+        containerSize.height === 0
+            ? 0
+            : offsetState < containerSize.height * 0.6
+              ? 0
+              : offsetState < containerSize.height * 1.6
+                ? 1
+                : 2
+
+    /* ---------- WHEEL ---------- */
+    useEffect(() => {
+        if (!containerRef.current || isStatic) return
+
+        const onWheel = (e: WheelEvent) => {
+            e.preventDefault()
+            if (!containerSize.height) return
+
+            const max = containerSize.height * 2
+            startTransition(() => {
+                setOffsetState((v) => Math.max(0, Math.min(max, v + e.deltaY)))
+            })
+            startTransition(() => {
+                setHasScrolled(true)
+            })
+        }
+
+        const el = containerRef.current
+        el.addEventListener("wheel", onWheel, { passive: false })
+        return () => el.removeEventListener("wheel", onWheel)
+    }, [containerSize.height, isStatic])
+
+    /* ---------- CURSOR ---------- */
+    const mouseX = useMotionValue(initialX)
+    const mouseY = useMotionValue(initialY)
+
+    const smoothX = useSpring(mouseX, {
+        stiffness: 80 + followSpeed * 300,
+        damping: 18,
+    })
+    const smoothY = useSpring(mouseY, {
+        stiffness: 80 + followSpeed * 300,
+        damping: 18,
+    })
+
+    const fullscreenSize =
+        Math.max(containerSize.width, containerSize.height) * 2.5
+
+    /* ✅ SAFE TRANSFORM (MotionValue → MotionValue) */
+    const baseMaskSizeMV = useSpring(
+        useTransform(
+            offsetMV,
+            [0, containerSize.height],
+            [maskSize, fullscreenSize],
+            { clamp: true }
+        ),
+        { stiffness: 120, damping: 22 }
+    )
+
+    // Spring that represents pointer presence (1 when inside, 0 when outside)
+    const pointerPresence = useSpring(0, {
+        stiffness: 200,
+        damping: 30,
+    })
+
+    useEffect(() => {
+        pointerPresence.set(isPointerInside ? 1 : 0)
+    }, [isPointerInside, pointerPresence])
+
+    const maskSizeMV = useTransform(
+        [baseMaskSizeMV, pointerPresence],
+        ([base, presence]) => base * presence
+    )
+
+    const maskX = useTransform([smoothX, maskSizeMV], ([x, s]) => x - s / 2)
+    const maskY = useTransform([smoothY, maskSizeMV], ([y, s]) => y - s / 2)
+
+    const inverseX = useTransform(maskX, (v) => -v)
+    const inverseY = useTransform(maskY, (v) => -v)
+
+    const updatePointerFromClient = (clientX: number, clientY: number) => {
+        if (!containerRef.current) return
+        const r = containerRef.current.getBoundingClientRect()
+        mouseX.set(clientX - r.left)
+        mouseY.set(clientY - r.top)
+    }
+
+    const handleMouseMove = (e: MouseEvent<HTMLDivElement>) => {
+        updatePointerFromClient(e.clientX, e.clientY)
+    }
+
+    const handleMouseEnter = () => {
+        if (
+            hideMaskTimeoutRef.current !== null &&
+            typeof window !== "undefined"
+        ) {
+            window.clearTimeout(hideMaskTimeoutRef.current)
+            hideMaskTimeoutRef.current = null
+        }
+        startTransition(() => {
+            setIsPointerInside(true)
+            setShowMask(true)
+        })
+    }
+
+    const handleMouseLeave = () => {
+        startTransition(() => {
+            setIsPointerInside(false)
+        })
+        if (typeof window !== "undefined") {
+            const timeoutId = window.setTimeout(() => {
+                startTransition(() => {
+                    setShowMask(false)
+                })
+                hideMaskTimeoutRef.current = null
+            }, 400)
+            hideMaskTimeoutRef.current = timeoutId
+        }
+    }
+
+    const handleTouchStart = (e: TouchEvent<HTMLDivElement>) => {
+        if (!e.touches[0]) return
+        touchLastYRef.current = e.touches[0].clientY
+        updatePointerFromClient(e.touches[0].clientX, e.touches[0].clientY)
+    }
+
+    const handleTouchMove = (e: TouchEvent<HTMLDivElement>) => {
+        if (!containerSize.height || !e.touches[0]) return
+        const currentY = e.touches[0].clientY
+        const lastY = touchLastYRef.current ?? currentY
+        const deltaY = lastY - currentY
+        touchLastYRef.current = currentY
+
+        const max = containerSize.height * 2
+        startTransition(() => {
+            setOffsetState((v) => Math.max(0, Math.min(max, v + deltaY)))
+        })
+        startTransition(() => {
+            setHasScrolled(true)
+        })
+        updatePointerFromClient(e.touches[0].clientX, e.touches[0].clientY)
+    }
+
+    /* ---------- PAGE MOVE ---------- */
+    const contentY = useSpring(
+        useTransform(offsetMV, (v: number) =>
+            v <= containerSize.height ? 0 : -(v - containerSize.height)
+        ),
+        { stiffness: 120, damping: 22 }
+    )
+
+    const getMaskStyle = (): CSSProperties => {
+        if (maskShape === "circle") return { borderRadius: "50%" }
+        if (maskShape === "square") return { borderRadius: 0 }
+        if (maskShape === "rounded") return { borderRadius }
+        if (maskShape === "custom" && maskImage?.src) {
+            return {
+                maskImage: `url(${maskImage.src})`,
+                WebkitMaskImage: `url(${maskImage.src})`,
+                maskRepeat: "no-repeat",
+                WebkitMaskRepeat: "no-repeat",
+                maskSize: "contain",
+                WebkitMaskSize: "contain",
+                maskPosition: "center",
+                WebkitMaskPosition: "center",
+            }
+        }
+        return { borderRadius: "50%" }
+    }
+
+    const fgSrc = foregroundImage?.src
+    const bgSrc = backgroundImage?.src
+
+    useEffect(() => {
+        return () => {
+            if (
+                hideMaskTimeoutRef.current !== null &&
+                typeof window !== "undefined"
+            ) {
+                window.clearTimeout(hideMaskTimeoutRef.current)
+            }
+        }
+    }, [])
+
+    return (
+        <div
+            ref={containerRef}
+            onMouseMove={isStatic ? undefined : handleMouseMove}
+            onTouchStart={isStatic ? undefined : handleTouchStart}
+            onTouchMove={isStatic ? undefined : handleTouchMove}
+            onMouseEnter={isStatic ? undefined : handleMouseEnter}
+            onMouseLeave={isStatic ? undefined : handleMouseLeave}
+            style={{
+                width: "100%",
+                height: "100%",
+                position: "relative",
+                overflow: "hidden",
+                background: "#000",
+                cursor: "default",
+            }}
+        >
+            <motion.div
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    height: "200%",
+                    y: contentY,
+                }}
+            >
+                {/* PAGE 1: Foreground + Background + Mask */}
+                <div style={{ height: "50%", position: "relative" }}>
+                    {bgSrc && (
+                        <div
+                            style={{
+                                position: "absolute",
+                                inset: 0,
+                                backgroundImage: `url(${bgSrc})`,
+                                backgroundSize: "cover",
+                                backgroundPosition: "center",
+                            }}
+                        />
+                    )}
+
+                    {fgSrc && (
+                        <motion.div
+                            animate={{ opacity: stage === 0 ? 1 : 0 }}
+                            transition={{ duration: 0.35 }}
+                            style={{
+                                position: "absolute",
+                                inset: 0,
+                                backgroundImage: `url(${fgSrc})`,
+                                backgroundSize: "cover",
+                                backgroundPosition: "center",
+                                zIndex: 2,
+                            }}
+                        />
+                    )}
+
+                    {stage <= 1 && showMask && (
+                        <motion.div
+                            style={{
+                                position: "absolute",
+                                width: maskSizeMV,
+                                height: maskSizeMV,
+                                x: maskX,
+                                y: maskY,
+                                zIndex: 4,
+                                overflow: "hidden",
+                                pointerEvents: "none",
+                                ...getMaskStyle(),
+                            }}
+                        >
+                            <motion.div
+                                style={{
+                                    width: containerSize.width,
+                                    height: containerSize.height,
+                                    backgroundImage: `url(${bgSrc})`,
+                                    backgroundSize: "cover",
+                                    backgroundPosition: "center",
+                                    x: inverseX,
+                                    y: inverseY,
+                                }}
+                            />
+                        </motion.div>
+                    )}
+                </div>
+
+                {/* PAGE 2: Crazy Navigation */}
+                <div style={{ height: "50%", position: "relative" }}>
+                    <CrazyNavigation
+                        menuLabel={menuButtonLabel}
+                        closeLabel={closeButtonLabel}
+                        introTitle={introTitle}
+                        menuItems={menuItems}
+                        mainBackground={stage2MainBackground}
+                        menuBackground="#F5F0DD"
+                        primaryTextColor={stage2MenuTextColor}
+                        inverseTextColor={stage2MainTextColor}
+                        headingFont={stage2HeadingFont}
+                        bodyFont={stage2BodyFont}
+                        buttonFont={closeButtonFont}
+                        menuButtonFont={menuButtonFont}
+                        stage2MainHeadingFont={stage2MainHeadingFont}
+                        stage2MainDescriptionFont={stage2MainDescriptionFont}
+                        menuItemsAlignment={menuItemsAlignment}
+                        stage2HeadingAlignment={stage2HeadingAlignment}
+                        stage2DescriptionAlignment={stage2DescriptionAlignment}
+                        animationDuration={0.7}
+                        mainHeadingLines={mainHeadingLines}
+                        mainDescription={mainDescription}
+                        stage={stage}
+                        style={{ width: "100%", height: "100%" }}
+                        stage2MenuBackgroundImage={stage2MenuBackgroundImage}
+                        page1BackgroundImage={page1BackgroundImage}
+                        page2BackgroundImage={page2BackgroundImage}
+                        page3BackgroundImage={page3BackgroundImage}
+                        onMenuOpen={() =>
+                            startTransition(() => {
+                                setHasOpenedMenu(true)
+                            })
+                        }
+                        closeButtonFont={closeButtonFont}
+                    />
+                </div>
+            </motion.div>
+            {/* Cursor-following hints */}
+            {!isStatic && isPointerInside && stage === 0 && !hasScrolled && (
+                <motion.div
+                    style={{
+                        position: "absolute",
+                        x: smoothX,
+                        y: smoothY,
+                        translateX: "-50%",
+                        translateY: "-160%",
+                        pointerEvents: "none",
+                        zIndex: 999,
+                        color: cursorHintTextColor,
+                        textTransform: "uppercase",
+                        background: cursorHintBackgroundColor,
+                        padding: "8px 14px",
+                        borderRadius: 999,
+                        border: `1px solid ${cursorHintBorderColor}`,
+                        whiteSpace: "nowrap",
+                        boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+                        backdropFilter: "blur(10px)",
+                        ...cursorHintFont,
+                    }}
+                >
+                    {cursorHintStage0Text}
+                </motion.div>
+            )}
+            {!isStatic && isPointerInside && stage === 2 && !hasOpenedMenu && (
+                <motion.div
+                    style={{
+                        position: "absolute",
+                        x: smoothX,
+                        y: smoothY,
+                        translateX: "-50%",
+                        translateY: "-160%",
+                        pointerEvents: "none",
+                        zIndex: 999,
+                        color: cursorHintTextColor,
+                        textTransform: "uppercase",
+                        background: cursorHintBackgroundColor,
+                        padding: "8px 14px",
+                        borderRadius: 999,
+                        border: `1px solid ${cursorHintBorderColor}`,
+                        whiteSpace: "nowrap",
+                        boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+                        backdropFilter: "blur(10px)",
+                        ...cursorHintFont,
+                    }}
+                >
+                    {cursorHintStage2Text}
+                </motion.div>
+            )}
+        </div>
+    )
+}
+
+interface CrazyNavProps {
+    menuLabel: string
+    closeLabel: string
+    introTitle: string
+    menuItems: string[]
+    mainBackground: string
+    menuBackground: string
+    primaryTextColor: string
+    inverseTextColor: string
+    headingFont: any
+    bodyFont: any
+    buttonFont: any
+    menuButtonFont?: any
+    stage2MainHeadingFont?: any
+    stage2MainDescriptionFont?: any
+    menuItemsAlignment?: "left" | "center" | "right"
+    stage2HeadingAlignment?: "left" | "center" | "right"
+    stage2DescriptionAlignment?: "left" | "center" | "right"
+    animationDuration: number
+    style?: CSSProperties
+    children?: any
+    mainHeadingLines: string[]
+    mainDescription: string
+    stage: Stage
+    stage2MenuBackgroundImage?: { src: string }
+    page1BackgroundImage?: { src: string }
+    page2BackgroundImage?: { src: string }
+    page3BackgroundImage?: { src: string }
+    onMenuOpen?: () => void
+    closeButtonFont?: any
+}
+
+function CrazyNavigation(props: CrazyNavProps) {
+    const {
+        menuLabel,
+        closeLabel,
+        introTitle,
+        menuItems,
+        mainBackground,
+        menuBackground,
+        primaryTextColor,
+        inverseTextColor,
+        headingFont,
+        bodyFont,
+        buttonFont,
+        menuButtonFont,
+        stage2MainHeadingFont,
+        stage2MainDescriptionFont,
+        menuItemsAlignment,
+        stage2HeadingAlignment,
+        stage2DescriptionAlignment,
+        animationDuration,
+        style,
+        children,
+        mainHeadingLines,
+        mainDescription,
+        stage,
+        stage2MenuBackgroundImage,
+        page1BackgroundImage,
+        page2BackgroundImage,
+        page3BackgroundImage,
+        onMenuOpen,
+        closeButtonFont,
+    } = props
+
+    const [isOpen, setIsOpen] = useState(false)
+    const [selectedPageIndex, setSelectedPageIndex] = useState<number | null>(null)
+    const [isPageLeaving, setIsPageLeaving] = useState(false)
+    const isStatic = useIsStaticRenderer()
+    const panelRef = useRef<HTMLDivElement | null>(null)
+    const headingRef = useRef<HTMLDivElement | null>(null)
+    const [headingRect, setHeadingRect] = useState<{
+        x: number
+        y: number
+        width: number
+        height: number
+    } | null>(null)
+
+    const duration = useMemo(() => {
+        if (isStatic) return 0
+        return animationDuration
+    }, [isStatic, animationDuration])
+
+    useEffect(() => {
+        if (!panelRef.current || !headingRef.current) return
+
+        const updateRect = () => {
+            const panelRect = panelRef.current?.getBoundingClientRect()
+            const headingBounds = headingRef.current?.getBoundingClientRect()
+            if (!panelRect || !headingBounds) return
+
+            const x = headingBounds.left - panelRect.left
+            const y = headingBounds.top - panelRect.top
+            const width = headingBounds.width
+            const height = headingBounds.height
+
+            startTransition(() => {
+                // Narrow the clip area horizontally but keep full height
+                const horizontalInsetFactor = 0.7
+                const verticalInsetFactor = 1
+                const insetX = x + (width * (1 - horizontalInsetFactor)) / 2
+                const insetY = y
+                const insetWidth = width * horizontalInsetFactor
+                const insetHeight = height * verticalInsetFactor
+                setHeadingRect({
+                    x: insetX,
+                    y: insetY,
+                    width: insetWidth,
+                    height: insetHeight,
+                })
+            })
+        }
+
+        updateRect()
+
+        const resizeObserver = new ResizeObserver(updateRect)
+        resizeObserver.observe(panelRef.current)
+        resizeObserver.observe(headingRef.current)
+
+        if (typeof window !== "undefined") {
+            window.addEventListener("resize", updateRect)
+        }
+
+        return () => {
+            resizeObserver.disconnect()
+            if (typeof window !== "undefined") {
+                window.removeEventListener("resize", updateRect)
+            }
+        }
+    }, [])
+
+    const openMenu = useCallback(() => {
+        startTransition(() => {
+            setIsOpen(true)
+            setSelectedPageIndex(null)
+        })
+        if (onMenuOpen) {
+            onMenuOpen()
+        }
+    }, [onMenuOpen])
+
+    const closeMenu = useCallback(() => {
+        startTransition(() => {
+            setIsOpen(false)
+            setSelectedPageIndex(null)
+        })
+    }, [])
+
+    const containerStyle: CSSProperties = {
+        position: "relative",
+        width: "100%",
+        height: "100%",
+        overflow: "hidden",
+        ...style,
+    }
+
+    const mainPanelVariants = {
+        closed: {
+            x: 0,
+            y: 0,
+            scale: 1,
+            rotate: 0,
+            borderRadius: 0,
+            boxShadow: "0 0 0 rgba(0,0,0,0)",
+        },
+        open: {
+            x: "28%",
+            y: "8%",
+            scale: 0.65,
+            rotate: -14,
+            borderRadius: 32,
+            boxShadow: "0 40px 80px rgba(0,0,0,0.5)",
+        },
+    }
+
+    const menuOpacityVariants = {
+        closed: { opacity: 0 },
+        open: { opacity: 1 },
+    }
+
+    const isFixedWidth = style && style.width === "100%"
+    const textAlignCenter = { textAlign: menuItemsAlignment || ("left" as const) }
+
+    const effectiveMainHeadingFont = stage2MainHeadingFont || {
+        ...headingFont,
+        fontSize: 120,
+        lineHeight: "0.82em",
+        letterSpacing: "-0.04em",
+        textTransform: "uppercase",
+    }
+
+    const effectiveMainDescriptionFont = stage2MainDescriptionFont || {
+        ...bodyFont,
+        fontSize: 20,
+        textTransform: "none",
+    }
+
+    const getPageBackground = (index: number): string | undefined => {
+        if (index === 0) return page1BackgroundImage?.src
+        if (index === 1) return page2BackgroundImage?.src
+        if (index === 2) return page3BackgroundImage?.src
+        return undefined
+    }
+
+    if (selectedPageIndex !== null) {
+        const pageBg = getPageBackground(selectedPageIndex) || mainBackground
+        const pageTitle = menuItems[selectedPageIndex] ?? ""
+
+        return (
+            <div style={containerStyle}>
+                <motion.div
+                    key={selectedPageIndex}
+                    initial={{ y: "100%", opacity: 0 }}
+                    animate={isPageLeaving ? { y: "100%", opacity: 0 } : { y: 0, opacity: 1 }}
+                    transition={{ duration, ease: [0.22, 0.61, 0.36, 1] }}
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        backgroundColor: mainBackground,
+                        backgroundImage: pageBg ? `url(${pageBg})` : undefined,
+                        backgroundSize: "cover",
+                        backgroundPosition: "center",
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "space-between",
+                        padding: "24px 32px 32px",
+                        boxSizing: "border-box",
+                        color: inverseTextColor,
+                    }}
+                >
+                    <button
+                        onClick={() => {
+                            startTransition(() => {
+                                setIsPageLeaving(true)
+                            })
+                            if (typeof window !== "undefined") {
+                                window.setTimeout(() => {
+                                    startTransition(() => {
+                                        setSelectedPageIndex(null)
+                                        setIsOpen(true)
+                                        setIsPageLeaving(false)
+                                    })
+                                }, duration * 1000)
+                            } else {
+                                startTransition(() => {
+                                    setSelectedPageIndex(null)
+                                    setIsOpen(true)
+                                    setIsPageLeaving(false)
+                                })
+                            }
+                        }}
+                        style={{
+                            alignSelf: "flex-start",
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            margin: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            cursor: "pointer",
+                            color: inverseTextColor,
+                            ...(closeButtonFont || buttonFont),
+                        }}
+                        aria-label={closeLabel}
+                    >
+                        <span
+                            aria-hidden="true"
+                            style={{
+                                fontSize: 20,
+                                lineHeight: 1,
+                                transform: "translateY(-1px)",
+                            }}
+                        >
+                            ×
+                        </span>
+                        <span>{closeLabel}</span>
+                    </button>
+                    <div
+                        style={{
+                            flex: 1,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            textAlign: "center",
+                            padding: "0 40px",
+                            boxSizing: "border-box",
+                            ...effectiveMainHeadingFont,
+                        }}
+                    >
+                        {pageTitle}
+                    </div>
+                </motion.div>
+            </div>
+        )
+    }
+
+    return (
+        <div style={containerStyle}>
+            {/* Menu Background */}
+            <motion.div
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    backgroundColor: menuBackground,
+                    color: primaryTextColor,
+                    padding: "32px 56px",
+                    boxSizing: "border-box",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "flex-start",
+                    pointerEvents: isOpen ? "auto" : "none",
+                    zIndex: 1,
+                    ...(stage2MenuBackgroundImage?.src && {
+                        backgroundImage: `url(${stage2MenuBackgroundImage.src})`,
+                        backgroundSize: "cover",
+                        backgroundPosition: "center",
+                    }),
+                }}
+                variants={menuOpacityVariants}
+                animate={isOpen ? "open" : "closed"}
+                initial="closed"
+                transition={{ duration, ease: [0.22, 0.61, 0.36, 1] }}
+            >
+                {/* Film grain overlay for menu */}
+                <div
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.15'/%3E%3C/svg%3E")`,
+                        opacity: 0.4,
+                        pointerEvents: "none",
+                        mixBlendMode: "overlay",
+                    }}
+                />
+                {/* Close Button */}
+                <button
+                    onClick={closeMenu}
+                    style={{
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        margin: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        cursor: "pointer",
+                        color: primaryTextColor,
+                        ...(closeButtonFont || buttonFont),
+                    }}
+                    aria-label={closeLabel}
+                >
+                    <span
+                        aria-hidden="true"
+                        style={{
+                            fontSize: 20,
+                            lineHeight: 1,
+                            transform: "translateY(-1px)",
+                        }}
+                    >
+                        ×
+                    </span>
+                    <span>{closeLabel}</span>
+                </button>
+
+                {/* Menu Content */}
+                <div
+                    style={{
+                        flex: 1,
+                        display: "flex",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 40,
+                    }}
+                >
+                    {/* Menu Items */}
+                    <div
+                        style={{
+                            maxWidth: "48%",
+                            ...headingFont,
+                            color: primaryTextColor,
+                        }}
+                    >
+                        <div
+                            style={{
+                                marginBottom: 40,
+                                fontSize: headingFont?.fontSize ?? 32,
+                                lineHeight: headingFont?.lineHeight ?? "1.1em",
+                                ...textAlignCenter,
+                            }}
+                        >
+                            {introTitle}
+                        </div>
+                        <div
+                            style={{
+                                ...bodyFont,
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 24,
+                                fontSize: bodyFont?.fontSize ?? 20,
+                            }}
+                        >
+                            {menuItems.map((item, index) => (
+                                <button
+                                    key={index}
+                                    type="button"
+                                    onClick={() => {
+                                        startTransition(() => {
+                                            setSelectedPageIndex(index)
+                                            setIsOpen(false)
+                                        })
+                                    }}
+                                    style={{
+                                        background: "none",
+                                        border: "none",
+                                        padding: 0,
+                                        margin: 0,
+                                        cursor: "pointer",
+                                        textAlign: menuItemsAlignment || "left",
+                                        color: primaryTextColor,
+                                        ...bodyFont,
+                                    }}
+                                >
+                                    {`${index + 1}. ${item}`}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Empty spacer so tilted panel on the right has room */}
+                    <div style={{ flex: 1, minWidth: 0 }} />
+                </div>
+            </motion.div>
+
+            {/* Main Panel */}
+            <motion.div
+                ref={panelRef}
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    backgroundColor: mainBackground,
+                    color: inverseTextColor,
+                    overflow: "hidden",
+                    boxSizing: "border-box",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    transformOrigin: "center center",
+                    zIndex: 2,
+                }}
+                variants={mainPanelVariants}
+                initial="closed"
+                animate={isOpen ? "open" : "closed"}
+                transition={{ duration, ease: [0.22, 0.61, 0.36, 1] }}
+            >
+                {/* Top Bar */}
+                <div
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "24px 32px",
+                        ...(closeButtonFont || buttonFont),
+                        position: "relative",
+                        zIndex: 1,
+                    }}
+                >
+                    <button
+                        onClick={openMenu}
+                        style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            background: "none",
+                            border: "none",
+                            color: inverseTextColor,
+                            cursor: "pointer",
+                            padding: 0,
+                            margin: 0,
+                            ...(menuButtonFont || closeButtonFont || buttonFont),
+                        }}
+                        aria-label={menuLabel}
+                    >
+                        <span
+                            aria-hidden="true"
+                            style={{
+                                display: "inline-block",
+                                position: "relative",
+                                width: 18,
+                                height: 10,
+                            }}
+                        >
+                            <span
+                                style={{
+                                    position: "absolute",
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    height: 2,
+                                    backgroundColor: inverseTextColor,
+                                }}
+                            />
+                            <span
+                                style={{
+                                    position: "absolute",
+                                    bottom: 0,
+                                    left: 0,
+                                    right: 0,
+                                    height: 2,
+                                    backgroundColor: inverseTextColor,
+                                }}
+                            />
+                        </span>
+                        <span>{menuLabel}</span>
+                    </button>
+                </div>
+
+                {/* Main Content */}
+                <div
+                    style={{
+                        flex: 1,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "0 40px 40px",
+                        boxSizing: "border-box",
+                        position: "relative",
+                        zIndex: 1,
+                    }}
+                >
+                    {children ? (
+                        children
+                    ) : (
+                        <div
+                            ref={headingRef}
+                            style={{
+                                width: isFixedWidth ? "100%" : "max-content",
+                                minWidth: isFixedWidth
+                                    ? undefined
+                                    : "max-content",
+                                ...effectiveMainHeadingFont,
+                                color: inverseTextColor,
+                                textAlign: stage2HeadingAlignment || "left",
+                            }}
+                        >
+                            {mainHeadingLines && mainHeadingLines.length > 0 ? (
+                                mainHeadingLines.map((line, index) => (
+                                    <div key={index}>{line}</div>
+                                ))
+                            ) : (
+                                <div>{introTitle}</div>
+                            )}
+                            <div
+                                style={{
+                                    ...effectiveMainDescriptionFont,
+                                    color: inverseTextColor,
+                                    marginTop: 40,
+                                    textAlign: stage2DescriptionAlignment || "left",
+                                }}
+                            >
+                                {mainDescription}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </motion.div>
+        </div>
+    )
+}
+
+/* ---------- CONTROLS ---------- */
+addPropertyControls(CursorMaskReveal, {
+    foregroundImage: { type: ControlType.ResponsiveImage },
+    backgroundImage: { type: ControlType.ResponsiveImage },
+    maskSize: { type: ControlType.Number, defaultValue: 200 },
+    maskShape: {
+        type: ControlType.Enum,
+        options: ["circle", "square", "rounded", "custom"],
+        defaultValue: "circle",
+    },
+    borderRadius: {
+        type: ControlType.Number,
+        defaultValue: 20,
+        hidden: (p) => p.maskShape !== "rounded",
+    },
+    maskImage: {
+        type: ControlType.ResponsiveImage,
+        hidden: (p) => p.maskShape !== "custom",
+    },
+    followSpeed: { type: ControlType.Number, defaultValue: 0.5 },
+    initialX: { type: ControlType.Number, defaultValue: 300 },
+    initialY: { type: ControlType.Number, defaultValue: 200 },
+
+    // 2 Main Heading text + style
+    mainHeadingLines: {
+        type: ControlType.Array,
+        title: "Main Headings",
+        defaultValue: ["Crazy", "Navigation", "Animation"],
+        control: {
+            type: ControlType.String,
+        },
+    },
+    stage2MainHeadingFont: {
+        type: ControlType.Font,
+        title: "2 Main Heading Font",
+        defaultValue: {
+            fontSize: "120px",
+            variant: "Bold",
+            letterSpacing: "-0.04em",
+            lineHeight: "0.82em",
+        },
+        controls: "extended",
+        defaultFontType: "sans-serif",
+    },
+    stage2HeadingAlignment: {
+        type: ControlType.Enum,
+        title: "2 Main Head Align",
+        options: ["left", "center", "right"],
+        optionTitles: ["Left", "Center", "Right"],
+        defaultValue: "left",
+        displaySegmentedControl: true,
+    },
+    stage2MainTextColor: {
+        type: ControlType.Color,
+        title: "2 Main Text",
+        defaultValue: "#F5F0DD",
+    },
+
+    // 2 Main Description text + style
+    mainDescription: {
+        type: ControlType.String,
+        title: "Main Description",
+        defaultValue: "Click the menu on the top left to see the magic...",
+    },
+    stage2MainDescriptionFont: {
+        type: ControlType.Font,
+        title: "2 Main Desc Font",
+        defaultValue: {
+            fontSize: "20px",
+            variant: "Medium",
+            letterSpacing: "-0.01em",
+            lineHeight: "1.3em",
+        },
+        controls: "extended",
+        defaultFontType: "sans-serif",
+    },
+    stage2DescriptionAlignment: {
+        type: ControlType.Enum,
+        title: "2 Main Desc Align",
+        options: ["left", "center", "right"],
+        optionTitles: ["Left", "Center", "Right"],
+        defaultValue: "left",
+        displaySegmentedControl: true,
+    },
+
+    // 2 Menu list text + style
+    menuItems: {
+        type: ControlType.Array,
+        title: "Menu Items",
+        defaultValue: [
+            "FallOf the Follower",
+            "How Creators Really feel",
+            "Hope in a Post-Follower World",
+            "The Core Fan Era",
+            "Creators are crushing it",
+            "Patreon's Responsibility",
+        ],
+        control: {
+            type: ControlType.String,
+        },
+    },
+    stage2BodyFont: {
+        type: ControlType.Font,
+        title: "2 Body Font",
+        defaultValue: {
+            fontSize: "20px",
+            variant: "Medium",
+            letterSpacing: "-0.01em",
+            lineHeight: "1.3em",
+        },
+        controls: "extended",
+        defaultFontType: "sans-serif",
+    },
+    menuItemsAlignment: {
+        type: ControlType.Enum,
+        title: "2 Menu Align",
+        options: ["left", "center", "right"],
+        optionTitles: ["Left", "Center", "Right"],
+        defaultValue: "left",
+        displaySegmentedControl: true,
+    },
+    stage2MenuTextColor: {
+        type: ControlType.Color,
+        title: "2 Menu Text",
+        defaultValue: "#000000",
+    },
+    stage2MenuBackgroundImage: {
+        type: ControlType.ResponsiveImage,
+        title: "2 Menu BG",
+    },
+    page1BackgroundImage: {
+        type: ControlType.ResponsiveImage,
+        title: "2 Page 1 BG",
+    },
+    page2BackgroundImage: {
+        type: ControlType.ResponsiveImage,
+        title: "2 Page 2 BG",
+    },
+    page3BackgroundImage: {
+        type: ControlType.ResponsiveImage,
+        title: "2 Page 3 BG",
+    },
+
+    // Intro title text + style
+    introTitle: {
+        type: ControlType.String,
+        title: "Intro Title",
+        defaultValue: "About Me",
+    },
+    stage2HeadingFont: {
+        type: ControlType.Font,
+        title: "2 Heading Font",
+        defaultValue: {
+            fontSize: "32px",
+            variant: "Semibold",
+            letterSpacing: "-0.03em",
+            lineHeight: "1.1em",
+        },
+        controls: "extended",
+        defaultFontType: "sans-serif",
+    },
+
+    // 2 Main background
+    stage2MainBackground: {
+        type: ControlType.Color,
+        title: "2 Main BG",
+        defaultValue: "#000000",
+    },
+    menuButtonLabel: {
+        type: ControlType.String,
+        title: "2 Menu Btn Label",
+        defaultValue: "Menu",
+    },
+    menuButtonFont: {
+        type: ControlType.Font,
+        title: "2 Menu Btn Font",
+        defaultValue: {
+            fontSize: "14px",
+            variant: "Semibold",
+            letterSpacing: "-0.01em",
+            lineHeight: "1em",
+        },
+        controls: "extended",
+        defaultFontType: "sans-serif",
+    },
+    closeButtonLabel: {
+        type: ControlType.String,
+        title: "2 Close Btn Label",
+        defaultValue: "Close",
+    },
+    closeButtonFont: {
+        type: ControlType.Font,
+        title: "2 Close Btn Font",
+        defaultValue: {
+            fontSize: "14px",
+            variant: "Semibold",
+            letterSpacing: "-0.01em",
+            lineHeight: "1em",
+        },
+        controls: "extended",
+        defaultFontType: "sans-serif",
+    },
+
+    // Cursor hints text + style
+    cursorHintStage0Text: {
+        type: ControlType.String,
+        title: "Cursor Hint Stage 0",
+        defaultValue: "scroll!!",
+    },
+    cursorHintStage2Text: {
+        type: ControlType.String,
+        title: "Cursor Hint Stage 2",
+        defaultValue: "menu !?",
+    },
+    cursorHintFont: {
+        type: ControlType.Font,
+        title: "Hint Font",
+        defaultValue: {
+            fontSize: "12px",
+            variant: "Medium",
+            letterSpacing: "0.16em",
+            lineHeight: "1em",
+        },
+        controls: "extended",
+        defaultFontType: "sans-serif",
+    },
+    cursorHintTextColor: {
+        type: ControlType.Color,
+        title: "Hint Text Color",
+        defaultValue: "#FFFFFF",
+    },
+    cursorHintBackgroundColor: {
+        type: ControlType.Color,
+        title: "Hint Background",
+        defaultValue: "rgba(0,0,0,0.7)",
+    },
+    cursorHintBorderColor: {
+        type: ControlType.Color,
+        title: "Hint Border",
+        defaultValue: "rgba(255,255,255,0.4)",
+    },
+})
