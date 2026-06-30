@@ -14,7 +14,7 @@ export const config = {
   menuItems: [
     "1. Where it all began",
     "2. Whats going on right now?",
-    "3. What I have built",
+    "3. My Projects",
   ],
   page3Link: "https://github.com/Sugunstar",
   menuButtonLabel: "Menu",
